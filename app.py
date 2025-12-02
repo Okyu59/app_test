@@ -1,5 +1,6 @@
 import os
 import re
+import math
 from collections import Counter
 from datetime import datetime, timedelta
 
@@ -22,7 +23,7 @@ st.set_page_config(
 APP_ID = "net.ib.android.smcard"  # 모니모 패키지명
 
 # ---------------------------------------------------------
-# 전역 CSS – KPI 카드 / 키워드 뱃지 / 리뷰 카드 스타일
+# 전역 CSS – 최대 가로폭 / KPI 카드 / 키워드 뱃지 / 리뷰 카드
 # ---------------------------------------------------------
 st.markdown(
     """
@@ -30,21 +31,36 @@ st.markdown(
 body {
     background-color: #f5f7fb;
 }
+
+/* ✅ 최대 가로폭 1600px, 가운데 정렬 */
 .block-container {
     padding-top: 1.5rem;
     padding-bottom: 2rem;
+    max-width: 1600px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* 상단 헤더 오른쪽 아이콘 정렬용 */
+.header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
 }
 
 /* KPI 카드 */
 .kpi-wrapper {
     display: flex;
+    flex-wrap: wrap;
     gap: 16px;
     margin-bottom: 16px;
 }
 .kpi-card {
     flex: 1;
-    padding: 18px 20px;
-    border-radius: 18px;
+    min-width: 200px;
+    padding: 22px 22px;          /* ✅ 높이 조금 더 키움 */
+    border-radius: 20px;
     color: #ffffff;
     box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
     position: relative;
@@ -56,14 +72,16 @@ body {
     margin-bottom: 4px;
 }
 .kpi-value {
-    font-size: 28px;
+    font-size: 30px;
     font-weight: 700;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
 }
 .kpi-sub {
     font-size: 12px;
     opacity: 0.85;
 }
+
+/* 각 KPI 카드별 그라데이션 */
 .kpi-avg-score {
     background: linear-gradient(135deg, #6366f1, #8b5cf6);
 }
@@ -72,6 +90,10 @@ body {
 }
 .kpi-negative-ratio {
     background: linear-gradient(135deg, #f97373, #ef4444);
+}
+/* ✅ 긍정 리뷰 비율 카드 – 파란색 계열 */
+.kpi-positive-ratio {
+    background: linear-gradient(135deg, #0ea5e9, #2563eb);
 }
 
 /* 카드 공통 */
@@ -104,7 +126,7 @@ body {
     border-color: rgba(184, 6, 6, 0.25);
 }
 
-/* 리뷰 리스트 */
+/* 리뷰 리스트 – 페이지네이션용 영역 */
 .review-list {
     max-height: 650px;
     overflow-y: auto;
@@ -139,6 +161,15 @@ body {
     line-height: 1.5;
     white-space: pre-wrap;
 }
+
+/* 페이지네이션 텍스트 중앙정렬 */
+.pagination-info {
+    text-align: center;
+    font-size: 13px;
+    color: #4b5563;
+    margin-top: 4px;
+    margin-bottom: 8px;
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -167,34 +198,89 @@ def get_reviews(days: int = 7) -> pd.DataFrame:
     return recent_df
 
 # ---------------------------------------------------------
-# 2. 텍스트 분석 – 순수 파이썬 한국어 토큰나이저
+# 2. 텍스트 토큰화 & 키워드 추출 (순수 파이썬)
 # ---------------------------------------------------------
-def extract_keywords(text_series: pd.Series) -> Counter:
-    """
-    리뷰 텍스트에서 한글 키워드를 추출해 빈도수 Counter로 반환.
-    - 한글 2글자 이상 단어만 사용
-    - 간단한 불용어 제거
-    """
-    all_text = " ".join(text_series.dropna().astype(str).tolist())
-
-    # 한글 2글자 이상 토큰 추출
-    tokens = re.findall(r"[가-힣]{2,}", all_text)
-
-    stopwords = [
-        "모니모", "삼성카드",
-        "앱", "어플", "사용", "이", "것", "저", "수", "때",
-        "자꾸", "왜", "좀", "해", "더", "함", "정도",
-        "그리고", "그냥", "진짜", "보고", "해서", "하면",
+KOREAN_STOPWORDS = set(
+    [
+        "모니모",
+        "삼성카드",
+        "앱",
+        "어플",
+        "사용",
+        "이",
+        "그",
+        "저",
+        "것",
+        "수",
+        "때",
+        "자꾸",
+        "왜",
+        "좀",
+        "해",
+        "더",
+        "함",
+        "정도",
+        "그리고",
+        "그냥",
+        "진짜",
+        "보고",
+        "해서",
+        "하면",
+        "이번",
+        "최근",
+        "거의",
+        "계속",
+        "매우",
     ]
-    tokens = [t for t in tokens if t not in stopwords]
+)
 
-    return Counter(tokens)
+
+def tokenize_korean(text: str):
+    """한글/숫자 위주로 토큰화 & 2글자 이상 단어만 사용."""
+    text = re.sub(r"[^가-힣0-9\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return []
+
+    tokens = text.split()
+    tokens = [
+        t for t in tokens if len(t) >= 2 and t not in KOREAN_STOPWORDS and not t.isdigit()
+    ]
+    return tokens
+
+
+def extract_unigrams(text_series: pd.Series) -> Counter:
+    """단어(유니그램) 빈도."""
+    all_tokens = []
+    for t in text_series.dropna().astype(str):
+        all_tokens.extend(tokenize_korean(t))
+    return Counter(all_tokens)
+
+
+def extract_bigrams(text_series: pd.Series) -> Counter:
+    """두 단어 묶음(바이그램) 빈도: '로그인 오류', '속도 느림' 등."""
+    bigram_counter = Counter()
+    for t in text_series.dropna().astype(str):
+        tokens = tokenize_korean(t)
+        for w1, w2 in zip(tokens, tokens[1:]):
+            if w1 == w2:
+                continue
+            if w1 in KOREAN_STOPWORDS or w2 in KOREAN_STOPWORDS:
+                continue
+            phrase = f"{w1} {w2}"
+            bigram_counter[phrase] += 1
+    return bigram_counter
 
 # ---------------------------------------------------------
 # 3. WordCloud용 폰트 경로 탐색
+#    ⚠️ 프로젝트 루트에 'NanumGothic.ttf' 같은 한글 폰트를 넣어두면
+#       Cloud 환경에서도 한글이 깨지지 않음.
 # ---------------------------------------------------------
-def get_korean_font_path() -> str | None:
+def get_korean_font_path():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
     candidates = [
+        os.path.join(base_dir, "NanumGothic.ttf"),
+        os.path.join(base_dir, "NotoSansKR-Regular.otf"),
         "/System/Library/Fonts/AppleGothic.ttf",
         "/Library/Fonts/AppleGothic.ttf",
         "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
@@ -206,12 +292,14 @@ def get_korean_font_path() -> str | None:
             return path
     return None
 
+
 FONT_PATH = get_korean_font_path()
 
 # ---------------------------------------------------------
 # 4. UI 렌더링 함수들
 # ---------------------------------------------------------
-def render_kpi_cards(avg_score: float, total_reviews: int, negative_ratio: float) -> None:
+def render_kpi_cards(avg_score, total_reviews, negative_ratio, positive_ratio):
+    """상단 KPI 카드 4개 렌더링."""
     html = f"""
     <div class="kpi-wrapper">
         <div class="kpi-card kpi-avg-score">
@@ -229,11 +317,18 @@ def render_kpi_cards(avg_score: float, total_reviews: int, negative_ratio: float
             <div class="kpi-value">{negative_ratio:.1f}%</div>
             <div class="kpi-sub">1~2점 리뷰 비중</div>
         </div>
+        <div class="kpi-card kpi-positive-ratio">
+            <div class="kpi-title">긍정 리뷰 비율</div>
+            <div class="kpi-value">{positive_ratio:.1f}%</div>
+            <div class="kpi-sub">4~5점 리뷰 비중</div>
+        </div>
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
 
-def render_keyword_badges(counter_obj: Counter, positive: bool = True) -> None:
+
+def render_keyword_badges(counter_obj: Counter, positive: bool = True):
+    """Top5 키워드를 뱃지 형태로 렌더링."""
     style_class = "badge-positive" if positive else "badge-negative"
 
     if not counter_obj:
@@ -247,10 +342,12 @@ def render_keyword_badges(counter_obj: Counter, positive: bool = True) -> None:
     )
     st.markdown(f"<div class='card'>{badges}</div>", unsafe_allow_html=True)
 
-def render_review_list(df: pd.DataFrame) -> None:
+
+def render_review_list(df_page: pd.DataFrame):
+    """현재 페이지에 해당하는 리뷰 카드 리스트."""
     st.markdown("<div class='review-list'>", unsafe_allow_html=True)
 
-    for _, row in df.sort_values(by="at", ascending=False).iterrows():
+    for _, row in df_page.iterrows():
         user = row.get("userName", "익명 사용자") or "익명 사용자"
         score = row.get("score", "-")
         content = row.get("content", "")
@@ -276,16 +373,39 @@ def render_review_list(df: pd.DataFrame) -> None:
 # 5. 메인 앱
 # ---------------------------------------------------------
 def main():
-    st.title("📱 모니모 플레이스토어 리뷰 대시보드")
-    st.caption("Google Play 리뷰를 기반으로 모니모 앱의 사용자 반응을 분석합니다.")
+    # ✅ 설정값 초기화 (분석 기간 / 페이지 번호)
+    if "days" not in st.session_state:
+        st.session_state["days"] = 7
+    if "page" not in st.session_state:
+        st.session_state["page"] = 1
 
-    # 사이드바 – 기간 선택
-    with st.sidebar:
-        st.header("⚙️ 분석 옵션")
-        days = st.slider("최근 N일 기준", min_value=3, max_value=30, value=7, step=1)
-        st.write("선택한 기간:", f"최근 {days}일")
+    # ---------- 상단 헤더 + 우측 설정 아이콘 (popover) ----------
+    with st.container():
+        st.markdown('<div class="header-row">', unsafe_allow_html=True)
+        left_col, right_col = st.columns([0.8, 0.2])
 
-    # 데이터 로드
+        with left_col:
+            st.title("📱 모니모 플레이스토어 리뷰 대시보드")
+            st.caption(
+                "Google Play 리뷰를 기반으로 모니모 앱의 사용자 반응을 분석합니다."
+            )
+
+        with right_col:
+            # ✅ 우상단 설정 아이콘 + 팝업 (분석 옵션)
+            with st.popover("⚙️ 설정", use_container_width=False):
+                st.write("분석 옵션")
+                st.session_state["days"] = st.slider(
+                    "최근 N일 기준", min_value=3, max_value=30, value=st.session_state["days"], step=1
+                )
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    days = st.session_state["days"]
+    st.markdown(
+        f"**분석 기간:** 최근 {days}일 ({(datetime.now() - timedelta(days=days)):%Y-%m-%d} ~ {datetime.now():%Y-%m-%d})"
+    )
+
+    # ---------- 데이터 로드 ----------
     with st.spinner("Google Play 리뷰를 수집하는 중입니다..."):
         try:
             df = get_reviews(days)
@@ -297,14 +417,18 @@ def main():
         st.warning("선택한 기간 동안 작성된 리뷰가 없거나 수집되지 않았습니다.")
         return
 
-    # KPI
+    # KPI 계산
     avg_score = df["score"].mean()
     total_reviews = len(df)
-    negative_ratio = len(df[df["score"] <= 2]) / total_reviews * 100
+    negative_cnt = len(df[df["score"] <= 2])
+    positive_cnt = len(df[df["score"] >= 4])
+    negative_ratio = negative_cnt / total_reviews * 100
+    positive_ratio = positive_cnt / total_reviews * 100
 
-    render_kpi_cards(avg_score, total_reviews, negative_ratio)
+    # ---------- KPI 카드 ----------
+    render_kpi_cards(avg_score, total_reviews, negative_ratio, positive_ratio)
 
-    # 좌/우 레이아웃
+    # ---------- 좌/우 레이아웃 ----------
     left_col, right_col = st.columns([0.6, 0.4], gap="large")
 
     # ----- 좌측: 추이 + 키워드 -----
@@ -339,21 +463,25 @@ def main():
 
         tab_neg, tab_pos = st.tabs(["🔥 부정 리뷰", "🍀 긍정 리뷰"])
 
+        # ----- 부정 리뷰 탭 -----
         with tab_neg:
             if not negative_reviews.empty:
-                neg_keywords = extract_keywords(negative_reviews)
-                st.markdown("**Top 5 부정 키워드**")
-                render_keyword_badges(neg_keywords, positive=False)
+                neg_unigrams = extract_unigrams(negative_reviews)
+                neg_bigrams = extract_bigrams(negative_reviews)
+
+                st.markdown("**Top 5 부정 키워드(문구 기준)**")
+                if neg_bigrams:
+                    render_keyword_badges(neg_bigrams, positive=False)
+                else:
+                    render_keyword_badges(neg_unigrams, positive=False)
 
                 st.markdown("**Word Cloud**")
-                if FONT_PATH is None:
-                    st.info("한글 폰트를 찾을 수 없어 WordCloud가 깨져 보일 수 있습니다.")
                 wc = WordCloud(
                     font_path=FONT_PATH,
                     background_color="white",
                     width=800,
                     height=300,
-                ).generate_from_frequencies(neg_keywords)
+                ).generate_from_frequencies(neg_unigrams)
 
                 fig, ax = plt.subplots(figsize=(8, 3))
                 ax.imshow(wc, interpolation="bilinear")
@@ -363,21 +491,25 @@ def main():
             else:
                 st.info("부정 리뷰가 충분하지 않습니다.")
 
+        # ----- 긍정 리뷰 탭 -----
         with tab_pos:
             if not positive_reviews.empty:
-                pos_keywords = extract_keywords(positive_reviews)
-                st.markdown("**Top 5 긍정 키워드**")
-                render_keyword_badges(pos_keywords, positive=True)
+                pos_unigrams = extract_unigrams(positive_reviews)
+                pos_bigrams = extract_bigrams(positive_reviews)
+
+                st.markdown("**Top 5 긍정 키워드(문구 기준)**")
+                if pos_bigrams:
+                    render_keyword_badges(pos_bigrams, positive=True)
+                else:
+                    render_keyword_badges(pos_unigrams, positive=True)
 
                 st.markdown("**Word Cloud**")
-                if FONT_PATH is None:
-                    st.info("한글 폰트를 찾을 수 없어 WordCloud가 깨져 보일 수 있습니다.")
                 wc_pos = WordCloud(
                     font_path=FONT_PATH,
                     background_color="white",
                     width=800,
                     height=300,
-                ).generate_from_frequencies(pos_keywords)
+                ).generate_from_frequencies(pos_unigrams)
 
                 fig2, ax2 = plt.subplots(figsize=(8, 3))
                 ax2.imshow(wc_pos, interpolation="bilinear")
@@ -387,10 +519,46 @@ def main():
             else:
                 st.info("긍정 리뷰가 충분하지 않습니다.")
 
-    # ----- 우측: 리뷰 리스트 -----
+    # ----- 우측: 리뷰 리스트 + 페이지네이션 -----
     with right_col:
         st.subheader("📝 리뷰 원문 보기")
-        render_review_list(df[["userName", "score", "content", "at"]])
+
+        df_sorted = df[["userName", "score", "content", "at"]].sort_values(
+            by="at", ascending=False
+        )
+
+        page_size = 15
+        total = len(df_sorted)
+        max_page = max(1, math.ceil(total / page_size))
+
+        # 현재 페이지가 범위를 벗어나지 않게 보정
+        if st.session_state["page"] > max_page:
+            st.session_state["page"] = max_page
+        if st.session_state["page"] < 1:
+            st.session_state["page"] = 1
+
+        col_prev, col_info, col_next = st.columns([1, 2, 1])
+
+        with col_prev:
+            if st.button("⬅ 이전", disabled=(st.session_state["page"] <= 1)):
+                st.session_state["page"] -= 1
+
+        with col_next:
+            if st.button("다음 ➡", disabled=(st.session_state["page"] >= max_page)):
+                st.session_state["page"] += 1
+
+        with col_info:
+            st.markdown(
+                f"<div class='pagination-info'>페이지 {st.session_state['page']} / {max_page} (총 {total}개)</div>",
+                unsafe_allow_html=True,
+            )
+
+        start = (st.session_state["page"] - 1) * page_size
+        end = start + page_size
+        df_page = df_sorted.iloc[start:end]
+
+        render_review_list(df_page)
+
 
 if __name__ == "__main__":
     main()
