@@ -198,7 +198,7 @@ def get_reviews(days: int = 7) -> pd.DataFrame:
     return recent_df
 
 # ---------------------------------------------------------
-# 2. 텍스트 토큰화 & 키워드 추출 (순수 파이썬)
+# 2. 텍스트 토큰화 & 키워드 추출 (순수 파이썬, 1단어 기준)
 # ---------------------------------------------------------
 KOREAN_STOPWORDS = set(
     [
@@ -231,6 +231,9 @@ KOREAN_STOPWORDS = set(
         "거의",
         "계속",
         "매우",
+        "이후",
+        "이후로",
+        "이후에",
     ]
 )
 
@@ -256,25 +259,8 @@ def extract_unigrams(text_series: pd.Series) -> Counter:
         all_tokens.extend(tokenize_korean(t))
     return Counter(all_tokens)
 
-
-def extract_bigrams(text_series: pd.Series) -> Counter:
-    """두 단어 묶음(바이그램) 빈도: '로그인 오류', '속도 느림' 등."""
-    bigram_counter = Counter()
-    for t in text_series.dropna().astype(str):
-        tokens = tokenize_korean(t)
-        for w1, w2 in zip(tokens, tokens[1:]):
-            if w1 == w2:
-                continue
-            if w1 in KOREAN_STOPWORDS or w2 in KOREAN_STOPWORDS:
-                continue
-            phrase = f"{w1} {w2}"
-            bigram_counter[phrase] += 1
-    return bigram_counter
-
 # ---------------------------------------------------------
 # 3. WordCloud용 폰트 경로 탐색
-#    ⚠️ 프로젝트 루트에 'NanumGothic.ttf' 같은 한글 폰트를 넣어두면
-#       Cloud 환경에서도 한글이 깨지지 않음.
 # ---------------------------------------------------------
 def get_korean_font_path():
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -328,7 +314,7 @@ def render_kpi_cards(avg_score, total_reviews, negative_ratio, positive_ratio):
 
 
 def render_keyword_badges(counter_obj: Counter, positive: bool = True):
-    """Top5 키워드를 뱃지 형태로 렌더링."""
+    """Top5 키워드를 뱃지 형태로 렌더링 (1단어 기준)."""
     style_class = "badge-positive" if positive else "badge-negative"
 
     if not counter_obj:
@@ -395,7 +381,11 @@ def main():
             with st.popover("⚙️ 설정", use_container_width=False):
                 st.write("분석 옵션")
                 st.session_state["days"] = st.slider(
-                    "최근 N일 기준", min_value=3, max_value=30, value=st.session_state["days"], step=1
+                    "최근 N일 기준",
+                    min_value=3,
+                    max_value=30,
+                    value=st.session_state["days"],
+                    step=1,
                 )
 
         st.markdown("</div>", unsafe_allow_html=True)
@@ -467,13 +457,9 @@ def main():
         with tab_neg:
             if not negative_reviews.empty:
                 neg_unigrams = extract_unigrams(negative_reviews)
-                neg_bigrams = extract_bigrams(negative_reviews)
 
-                st.markdown("**Top 5 부정 키워드(문구 기준)**")
-                if neg_bigrams:
-                    render_keyword_badges(neg_bigrams, positive=False)
-                else:
-                    render_keyword_badges(neg_unigrams, positive=False)
+                st.markdown("**Top 5 부정 키워드 (1단어 기준)**")
+                render_keyword_badges(neg_unigrams, positive=False)
 
                 st.markdown("**Word Cloud**")
                 wc = WordCloud(
@@ -495,13 +481,9 @@ def main():
         with tab_pos:
             if not positive_reviews.empty:
                 pos_unigrams = extract_unigrams(positive_reviews)
-                pos_bigrams = extract_bigrams(positive_reviews)
 
-                st.markdown("**Top 5 긍정 키워드(문구 기준)**")
-                if pos_bigrams:
-                    render_keyword_badges(pos_bigrams, positive=True)
-                else:
-                    render_keyword_badges(pos_unigrams, positive=True)
+                st.markdown("**Top 5 긍정 키워드 (1단어 기준)**")
+                render_keyword_badges(pos_unigrams, positive=True)
 
                 st.markdown("**Word Cloud**")
                 wc_pos = WordCloud(
