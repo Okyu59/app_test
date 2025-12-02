@@ -1,4 +1,5 @@
 import os
+import re
 from collections import Counter
 from datetime import datetime, timedelta
 
@@ -7,11 +8,10 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 from google_play_scraper import Sort, reviews
-from mecab import MeCab
 from wordcloud import WordCloud
 
 # ---------------------------------------------------------
-# 기본 설정 (Streamlit Cloud에서도 문제없게 최소 옵션)
+# 기본 설정
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="모니모 리뷰 대시보드",
@@ -20,7 +20,6 @@ st.set_page_config(
 )
 
 APP_ID = "net.ib.android.smcard"  # 모니모 패키지명
-
 
 # ---------------------------------------------------------
 # 전역 CSS – KPI 카드 / 키워드 뱃지 / 리뷰 카드 스타일
@@ -31,14 +30,12 @@ st.markdown(
 body {
     background-color: #f5f7fb;
 }
-
-/* 레이아웃 여백 조정 */
 .block-container {
     padding-top: 1.5rem;
     padding-bottom: 2rem;
 }
 
-/* KPI 카드 공통 */
+/* KPI 카드 */
 .kpi-wrapper {
     display: flex;
     gap: 16px;
@@ -67,8 +64,6 @@ body {
     font-size: 12px;
     opacity: 0.85;
 }
-
-/* 각 KPI 카드 별 그라데이션 */
 .kpi-avg-score {
     background: linear-gradient(135deg, #6366f1, #8b5cf6);
 }
@@ -79,7 +74,7 @@ body {
     background: linear-gradient(135deg, #f97373, #ef4444);
 }
 
-/* 키워드 섹션 카드 */
+/* 카드 공통 */
 .card {
     background: #ffffff;
     padding: 18px 22px;
@@ -109,7 +104,7 @@ body {
     border-color: rgba(184, 6, 6, 0.25);
 }
 
-/* 리뷰 카드 리스트 */
+/* 리뷰 리스트 */
 .review-list {
     max-height: 650px;
     overflow-y: auto;
@@ -149,11 +144,10 @@ body {
     unsafe_allow_html=True,
 )
 
-
 # ---------------------------------------------------------
-# 1. 데이터 수집 함수 (캐시 적용)
+# 1. 데이터 수집 (캐시)
 # ---------------------------------------------------------
-@st.cache_data(ttl=3600)  # 1시간 동안 캐시 (Cloud 비용/속도 최적화)
+@st.cache_data(ttl=3600)
 def get_reviews(days: int = 7) -> pd.DataFrame:
     """최근 N일간의 Google Play 리뷰를 수집."""
     result, _ = reviews(
@@ -161,7 +155,7 @@ def get_reviews(days: int = 7) -> pd.DataFrame:
         lang="ko",
         country="kr",
         sort=Sort.NEWEST,
-        count=300,  # 최근 300개 정도면 충분한 샘플
+        count=300,
     )
 
     df = pd.DataFrame(result)
@@ -172,97 +166,74 @@ def get_reviews(days: int = 7) -> pd.DataFrame:
 
     return recent_df
 
-
 # ---------------------------------------------------------
-# 2. 텍스트 분석 (Mecab 명사 추출)
+# 2. 텍스트 분석 – 순수 파이썬 한국어 토큰나이저
 # ---------------------------------------------------------
 def extract_keywords(text_series: pd.Series) -> Counter:
-    """리뷰 텍스트에서 명사 키워드를 추출해 빈도수 Counter로 반환."""
-    mecab = MeCab()
+    """
+    리뷰 텍스트에서 한글 키워드를 추출해 빈도수 Counter로 반환.
+    - 한글 2글자 이상 단어만 사용
+    - 간단한 불용어 제거
+    """
     all_text = " ".join(text_series.dropna().astype(str).tolist())
 
-    nouns = mecab.nouns(all_text)
+    # 한글 2글자 이상 토큰 추출
+    tokens = re.findall(r"[가-힣]{2,}", all_text)
 
     stopwords = [
-        "앱",
-        "어플",
-        "사용",
-        "이",
-        "것",
-        "저",
-        "수",
-        "때",
-        "자꾸",
-        "왜",
-        "좀",
-        "해",
-        "더",
-        "함",
-        "정도",
-        "그리고",
-        "그냥",
-        "진짜",
-        "보고",
-        "해서",
+        "모니모", "삼성카드",
+        "앱", "어플", "사용", "이", "것", "저", "수", "때",
+        "자꾸", "왜", "좀", "해", "더", "함", "정도",
+        "그리고", "그냥", "진짜", "보고", "해서", "하면",
     ]
-    nouns = [n for n in nouns if len(n) > 1 and n not in stopwords]
+    tokens = [t for t in tokens if t not in stopwords]
 
-    return Counter(nouns)
-
+    return Counter(tokens)
 
 # ---------------------------------------------------------
-# 3. WordCloud용 폰트 경로 자동 선택 (Cloud 배포 고려)
+# 3. WordCloud용 폰트 경로 탐색
 # ---------------------------------------------------------
 def get_korean_font_path() -> str | None:
-    """
-    환경에 따라 사용 가능한 한글 폰트를 자동 탐색.
-    못 찾으면 None 반환 (이 경우 WordCloud가 한글을 제대로 못 그릴 수 있음).
-    """
     candidates = [
-        "/System/Library/Fonts/AppleGothic.ttf",  # macOS
+        "/System/Library/Fonts/AppleGothic.ttf",
         "/Library/Fonts/AppleGothic.ttf",
-        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",  # 리눅스(Cloud)
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-        "malgun.ttf",  # 윈도우
+        "malgun.ttf",
     ]
     for path in candidates:
         if os.path.exists(path):
             return path
     return None
 
-
 FONT_PATH = get_korean_font_path()
 
-
 # ---------------------------------------------------------
-# 4. UI 컴포넌트 렌더링 함수
+# 4. UI 렌더링 함수들
 # ---------------------------------------------------------
 def render_kpi_cards(avg_score: float, total_reviews: int, negative_ratio: float) -> None:
-    """상단 KPI 카드 3개를 레퍼런스 스타일로 렌더링."""
     html = f"""
     <div class="kpi-wrapper">
         <div class="kpi-card kpi-avg-score">
             <div class="kpi-title">평균 평점</div>
             <div class="kpi-value">{avg_score:.2f} ⭐</div>
-            <div class="kpi-sub">최근 기간 기준 앱 리뷰 평균 점수</div>
+            <div class="kpi-sub">선택한 기간 기준 평균 앱 평점</div>
         </div>
         <div class="kpi-card kpi-total-reviews">
             <div class="kpi-title">총 리뷰 수</div>
             <div class="kpi-value">{total_reviews} 건</div>
-            <div class="kpi-sub">선택한 기간 동안 수집된 전체 리뷰 수</div>
+            <div class="kpi-sub">선택한 기간 동안 수집된 리뷰 수</div>
         </div>
         <div class="kpi-card kpi-negative-ratio">
             <div class="kpi-title">부정 리뷰 비율</div>
             <div class="kpi-value">{negative_ratio:.1f}%</div>
-            <div class="kpi-sub">1~2점 리뷰가 전체에서 차지하는 비중</div>
+            <div class="kpi-sub">1~2점 리뷰 비중</div>
         </div>
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
 
-
 def render_keyword_badges(counter_obj: Counter, positive: bool = True) -> None:
-    """Top5 키워드를 뱃지 형태로 렌더링."""
     style_class = "badge-positive" if positive else "badge-negative"
 
     if not counter_obj:
@@ -271,16 +242,12 @@ def render_keyword_badges(counter_obj: Counter, positive: bool = True) -> None:
 
     items = counter_obj.most_common(5)
     badges = "".join(
-        [
-            f"<span class='keyword-badge {style_class}'>{k} ({v})</span>"
-            for k, v in items
-        ]
+        f"<span class='keyword-badge {style_class}'>{k} ({v})</span>"
+        for k, v in items
     )
     st.markdown(f"<div class='card'>{badges}</div>", unsafe_allow_html=True)
 
-
 def render_review_list(df: pd.DataFrame) -> None:
-    """오른쪽 패널: 리뷰 카드 리스트 (스크롤 가능)."""
     st.markdown("<div class='review-list'>", unsafe_allow_html=True)
 
     for _, row in df.sort_values(by="at", ascending=False).iterrows():
@@ -305,15 +272,14 @@ def render_review_list(df: pd.DataFrame) -> None:
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-
 # ---------------------------------------------------------
 # 5. 메인 앱
 # ---------------------------------------------------------
 def main():
     st.title("📱 모니모 플레이스토어 리뷰 대시보드")
-    st.caption("최근 Google Play 리뷰를 기반으로 모니모 앱의 사용자 반응을 분석합니다.")
+    st.caption("Google Play 리뷰를 기반으로 모니모 앱의 사용자 반응을 분석합니다.")
 
-    # 사이드바 – 분석 기간 선택
+    # 사이드바 – 기간 선택
     with st.sidebar:
         st.header("⚙️ 분석 옵션")
         days = st.slider("최근 N일 기준", min_value=3, max_value=30, value=7, step=1)
@@ -331,18 +297,17 @@ def main():
         st.warning("선택한 기간 동안 작성된 리뷰가 없거나 수집되지 않았습니다.")
         return
 
-    # KPI 계산
+    # KPI
     avg_score = df["score"].mean()
     total_reviews = len(df)
     negative_ratio = len(df[df["score"] <= 2]) / total_reviews * 100
 
-    # KPI 카드 렌더링
     render_kpi_cards(avg_score, total_reviews, negative_ratio)
 
-    # 상단 메인 레이아웃: 좌측 그래프/키워드, 우측 리뷰 리스트
+    # 좌/우 레이아웃
     left_col, right_col = st.columns([0.6, 0.4], gap="large")
 
-    # ------------------ 좌측: 그래프 + 키워드 ------------------
+    # ----- 좌측: 추이 + 키워드 -----
     with left_col:
         st.subheader("📈 일별 평균 평점 추이")
         daily_df = (
@@ -374,7 +339,6 @@ def main():
 
         tab_neg, tab_pos = st.tabs(["🔥 부정 리뷰", "🍀 긍정 리뷰"])
 
-        # ---------- 부정 리뷰 탭 ----------
         with tab_neg:
             if not negative_reviews.empty:
                 neg_keywords = extract_keywords(negative_reviews)
@@ -399,7 +363,6 @@ def main():
             else:
                 st.info("부정 리뷰가 충분하지 않습니다.")
 
-        # ---------- 긍정 리뷰 탭 ----------
         with tab_pos:
             if not positive_reviews.empty:
                 pos_keywords = extract_keywords(positive_reviews)
@@ -424,11 +387,10 @@ def main():
             else:
                 st.info("긍정 리뷰가 충분하지 않습니다.")
 
-    # ------------------ 우측: 리뷰 리스트 ------------------
+    # ----- 우측: 리뷰 리스트 -----
     with right_col:
         st.subheader("📝 리뷰 원문 보기")
         render_review_list(df[["userName", "score", "content", "at"]])
-
 
 if __name__ == "__main__":
     main()

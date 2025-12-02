@@ -4,4 +4,3 @@ pandas
 plotly
 wordcloud
 matplotlib
-python-mecab-ko
