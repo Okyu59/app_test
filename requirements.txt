@@ -1,0 +1,7 @@
+streamlit
+google-play-scraper
+pandas
+plotly
+wordcloud
+matplotlib
+python-mecab-ko
