@@ -330,7 +330,7 @@ def render_keyword_badges(counter_obj: Counter, positive: bool = True):
         st.write("키워드가 충분하지 않습니다.")
         return
 
-    items = counter_obj.most_common(5)
+    items = counter_obj.most_common(10)
     badges = "".join(
         f"<span class='keyword-badge {style_class}'>{k} ({v})</span>"
         for k, v in items
@@ -475,7 +475,7 @@ def main():
                     font_path=FONT_PATH,
                     background_color="white",
                     width=800,
-                    height=300,
+                    height=800,
                 ).generate_from_frequencies(neg_unigrams)
 
                 fig, ax = plt.subplots(figsize=(8, 3))
@@ -499,7 +499,7 @@ def main():
                     font_path=FONT_PATH,
                     background_color="white",
                     width=800,
-                    height=300,
+                    height=800,
                 ).generate_from_frequencies(pos_unigrams)
 
                 fig2, ax2 = plt.subplots(figsize=(8, 3))
