@@ -458,7 +458,7 @@ def main():
             if not negative_reviews.empty:
                 neg_unigrams = extract_unigrams(negative_reviews)
 
-                st.markdown("**Top 5 부정 키워드 (1단어 기준)**")
+                st.markdown("**Top 5 부정 키워드**")
                 render_keyword_badges(neg_unigrams, positive=False)
 
                 st.markdown("**Word Cloud**")
@@ -482,7 +482,7 @@ def main():
             if not positive_reviews.empty:
                 pos_unigrams = extract_unigrams(positive_reviews)
 
-                st.markdown("**Top 5 긍정 키워드 (1단어 기준)**")
+                st.markdown("**Top 5 긍정 키워드**")
                 render_keyword_badges(pos_unigrams, positive=True)
 
                 st.markdown("**Word Cloud**")
