@@ -523,7 +523,7 @@ def main():
         positive_reviews = df[df["score"] >= 4]["content"]
         negative_reviews = df[df["score"] <= 2]["content"]
 
-        tab_neg, tab_pos = st.tabs(["🔥 부정 리뷰", "🍀 긍정 리뷰"])
+        tab_pos, tab_neg = st.tabs(["🍀 긍정 리뷰", "🔥 부정 리뷰"])
 
         # ----- 부정 리뷰 탭 -----
         with tab_neg:
