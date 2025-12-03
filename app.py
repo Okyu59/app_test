@@ -288,6 +288,9 @@ KOREAN_STOPWORDS = set(
         "다른",
         "정말",
         "무슨",
+        "이렇게",
+        "없고",
+        "누르면"
     ]
 )
 
@@ -527,7 +530,7 @@ def main():
             if not negative_reviews.empty:
                 neg_unigrams = extract_unigrams(negative_reviews)
 
-                st.markdown("**Top 10 부정 키워드 (1단어 기준)**")
+                st.markdown("**Top 10 부정 키워드**")
                 render_keyword_badges(neg_unigrams, positive=False)
 
                 st.markdown("**Word Cloud**")
@@ -553,7 +556,7 @@ def main():
             if not positive_reviews.empty:
                 pos_unigrams = extract_unigrams(positive_reviews)
 
-                st.markdown("**Top 10 긍정 키워드 (1단어 기준)**")
+                st.markdown("**Top 10 긍정 키워드**")
                 render_keyword_badges(pos_unigrams, positive=True)
 
                 st.markdown("**Word Cloud**")
