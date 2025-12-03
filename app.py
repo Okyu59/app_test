@@ -467,7 +467,7 @@ def main():
             if not negative_reviews.empty:
                 neg_unigrams = extract_unigrams(negative_reviews)
 
-                st.markdown("**Top 5 부정 키워드**")
+                st.markdown("**Top 10 부정 키워드**")
                 render_keyword_badges(neg_unigrams, positive=False)
 
                 st.markdown("**Word Cloud**")
@@ -475,7 +475,7 @@ def main():
                     font_path=FONT_PATH,
                     background_color="white",
                     width=800,
-                    height=800,
+                    height=600,
                 ).generate_from_frequencies(neg_unigrams)
 
                 fig, ax = plt.subplots(figsize=(8, 3))
@@ -491,7 +491,7 @@ def main():
             if not positive_reviews.empty:
                 pos_unigrams = extract_unigrams(positive_reviews)
 
-                st.markdown("**Top 5 긍정 키워드**")
+                st.markdown("**Top 10 긍정 키워드**")
                 render_keyword_badges(pos_unigrams, positive=True)
 
                 st.markdown("**Word Cloud**")
@@ -499,7 +499,7 @@ def main():
                     font_path=FONT_PATH,
                     background_color="white",
                     width=800,
-                    height=800,
+                    height=600,
                 ).generate_from_frequencies(pos_unigrams)
 
                 fig2, ax2 = plt.subplots(figsize=(8, 3))
