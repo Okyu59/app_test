@@ -1,18 +1,23 @@
-import os
-import re
-import math
-from collections import Counter
-from datetime import datetime, timedelta
+# ---------------------------------------------------------
+# 모니모 리뷰 대시보드 — 개선 버전(애니메이션 WordCloud 포함)
+# ---------------------------------------------------------
 
-import matplotlib.pyplot as plt
-import pandas as pd
-import plotly.express as px
 import streamlit as st
+import pandas as pd
 from google_play_scraper import Sort, reviews
+from datetime import datetime, timedelta
+import plotly.express as px
+from collections import Counter
 from wordcloud import WordCloud
+import matplotlib.pyplot as plt
+import numpy as np
+import re
+import random
+import requests
+import os
 
 # ---------------------------------------------------------
-# 기본 설정
+# 0. 페이지 설정
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="모니모 리뷰 대시보드",
@@ -20,600 +25,287 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-APP_ID = "net.ib.android.smcard"  # 모니모 패키지명
-
 # ---------------------------------------------------------
-# 전역 CSS + Iconify 스크립트 – 최대 가로폭 / KPI 카드 / 키워드 뱃지 / 리뷰 카드 / 애니메이션
+# 1. 스타일 커스터마이징
 # ---------------------------------------------------------
 st.markdown(
     """
-<!-- Iconify Solar Duotone Bold Icons -->
-<script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+    <style>
+        /* 전체 가로폭 제한 + 중앙정렬 */
+        .main-container {
+            max-width: 1600px;
+            margin: auto;
+        }
+        .block-container {
+            padding-top: 2rem !important;
+        }
 
-<style>
-body {
-    background-color: #f5f7fb;
-}
+        /* KPI 카드 스타일 개선 */
+        .kpi-card {
+            background: #ffffff;
+            border-radius: 18px;
+            padding: 26px 32px;
+            box-shadow: 0px 4px 18px rgba(0,0,0,0.07);
+            text-align: center;
+            transition: all 0.25s ease;
+        }
+        .kpi-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0px 8px 25px rgba(0,0,0,0.12);
+        }
+        .kpi-value {
+            font-size: 34px;
+            font-weight: 700;
+        }
+        .kpi-label {
+            font-size: 15px;
+            color: #666;
+            margin-top: 6px;
+        }
 
-/* ✅ 최대 가로폭 1600px, 가운데 정렬 */
-.block-container {
-    padding-top: 1.5rem;
-    padding-bottom: 2rem;
-    max-width: 1600px;
-    margin-left: auto;
-    margin-right: auto;
-}
+        /* 긍정 카드 — 파란색 강조 */
+        .kpi-positive {
+            background: linear-gradient(135deg, #d9ecff, #f1f7ff);
+        }
 
-/* 상단 헤더: 로고 + 타이틀 레이아웃 */
-.header-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.5rem;
-}
-.logo-title {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-.logo-title img {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-}
+        /* 섹션 간 여백 증가 */
+        .section-spacing {
+            margin-top: 40px;
+            margin-bottom: 32px;
+        }
 
-/* 키프레임 애니메이션 */
-@keyframes fadeInUp {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
+        /* 앱 로고 사이즈 개선 */
+        .app-logo {
+            width: 90px;
+            height: 90px;
+            object-fit: contain;
+            margin-right: 14px;
+        }
 
-/* KPI 카드 */
-.kpi-wrapper {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-    margin-bottom: 16px;
-}
-.kpi-card {
-    flex: 1;
-    min-width: 200px;
-    padding: 22px 22px;          /* 높이 조금 더 키움 */
-    border-radius: 20px;
-    color: #ffffff;
-    box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
-    position: relative;
-    overflow: hidden;
-    animation: fadeInUp 0.4s ease-out;
-    transition: transform 0.18s ease-out, box-shadow 0.18s ease-out;
-}
-.kpi-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.25);
-}
-.kpi-title {
-    font-size: 14px;
-    opacity: 0.9;
-    margin-bottom: 4px;
-}
-.kpi-value {
-    font-size: 30px;
-    font-weight: 700;
-    margin-bottom: 8px;
-}
-.kpi-sub {
-    font-size: 12px;
-    opacity: 0.85;
-}
+        /* Solar icons (Duotone Bold) 크기 정의 */
+        .solar-icon {
+            width: 26px;
+            height: 26px;
+            cursor: pointer;
+        }
 
-/* 각 KPI 카드별 그라데이션 */
-.kpi-avg-score {
-    background: linear-gradient(135deg, #6366f1, #8b5cf6);
-}
-.kpi-total-reviews {
-    background: linear-gradient(135deg, #ec4899, #f97316);
-}
-.kpi-negative-ratio {
-    background: linear-gradient(135deg, #f97373, #ef4444);
-}
-/* ✅ 긍정 리뷰 비율 카드 – 파란색 계열 */
-.kpi-positive-ratio {
-    background: linear-gradient(135deg, #0ea5e9, #2563eb);
-}
-
-/* 카드 공통 */
-.card {
-    background: #ffffff;
-    padding: 18px 22px;
-    border-radius: 18px;
-    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
-    margin-bottom: 18px;
-    animation: fadeInUp 0.4s ease-out;
-    transition: transform 0.18s ease-out, box-shadow 0.18s ease-out;
-}
-.card:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
-}
-
-/* 키워드 뱃지 */
-.keyword-badge {
-    display: inline-block;
-    padding: 6px 12px;
-    margin: 4px;
-    border-radius: 999px;
-    font-size: 13px;
-    font-weight: 600;
-    border: 1px solid transparent;
-}
-.badge-positive {
-    background: #e5f6ea;
-    color: #137333;
-    border-color: rgba(19, 115, 51, 0.25);
-}
-.badge-negative {
-    background: #feecec;
-    color: #b80606;
-    border-color: rgba(184, 6, 6, 0.25);
-}
-
-/* 리뷰 리스트 – 페이지네이션용 영역 */
-.review-list {
-    max-height: 650px;
-    overflow-y: auto;
-    padding-right: 4px;
-}
-.review-card {
-    background: #ffffff;
-    padding: 14px 16px;
-    border-radius: 14px;
-    margin-bottom: 10px;
-    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
-    animation: fadeInUp 0.35s ease-out;
-    transition: transform 0.16s ease-out, box-shadow 0.16s ease-out;
-}
-.review-card:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 8px 26px rgba(15, 23, 42, 0.14);
-}
-.review-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 12px;
-    margin-bottom: 6px;
-    color: #6b7280;
-}
-.review-user {
-    font-weight: 600;
-    color: #111827;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-}
-.review-score {
-    font-weight: 600;
-    color: #f59e0b;
-}
-.review-content {
-    color: #374151;
-    font-size: 13px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-}
-
-/* 페이지네이션 텍스트 중앙정렬 */
-.pagination-info {
-    text-align: center;
-    font-size: 13px;
-    color: #4b5563;
-    margin-top: 4px;
-    margin-bottom: 8px;
-}
-</style>
-""",
+    </style>
+    """,
     unsafe_allow_html=True,
 )
 
+CONTAINER_START = '<div class="main-container">'
+CONTAINER_END = '</div>'
+st.markdown(CONTAINER_START, unsafe_allow_html=True)
+
+
 # ---------------------------------------------------------
-# 1. 데이터 수집 (캐시)
+# 2. 한글 폰트 다운로드
 # ---------------------------------------------------------
+FONT_PATH = "/tmp/NotoSansCJK-Regular.otf"
+
+if not os.path.exists(FONT_PATH):
+    url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/Japanese/NotoSansCJK-Regular.otf"
+    r = requests.get(url)
+    with open(FONT_PATH, "wb") as f:
+        f.write(r.content)
+
+
+# ---------------------------------------------------------
+# 3. 불용어 + 토크나이저
+# ---------------------------------------------------------
+STOPWORDS = set([
+    "모니모","삼성카드","앱","어플","사용","이","그","저","것","수","때","자꾸","왜","좀",
+    "해","더","함","그리고","그냥","진짜","해서","하면","이번","최근","거의","계속","매우",
+    "너무","하고","하기","다른","정말","무슨","다시",
+    "이렇게","로","없고","누르면"
+])
+
+def tokenize(text):
+    """한글 기반 단순 토크나이징"""
+    text = re.sub(r"[^가-힣0-9\s]", " ", str(text))
+    text = re.sub(r"\s+", " ", text).strip()
+    words = text.split()
+    words = [w for w in words if len(w) >= 2 and w not in STOPWORDS]
+    return words
+
+def extract_keywords(series):
+    counter = Counter()
+    for t in series.dropna().astype(str):
+        counter.update(tokenize(t))
+    return counter
+
+
+# ---------------------------------------------------------
+# 4. 데이터 수집
+# ---------------------------------------------------------
+APP_ID = "net.ib.android.smcard"
+
 @st.cache_data(ttl=3600)
-def get_reviews(days: int = 7) -> pd.DataFrame:
-    """최근 N일간의 Google Play 리뷰를 수집."""
+def get_reviews(days=7):
     result, _ = reviews(
         APP_ID,
         lang="ko",
         country="kr",
         sort=Sort.NEWEST,
-        count=300,
+        count=300
     )
-
     df = pd.DataFrame(result)
     df["at"] = pd.to_datetime(df["at"])
 
-    cutoff_date = datetime.now() - timedelta(days=days)
-    recent_df = df[df["at"] >= cutoff_date].copy()
+    cutoff = datetime.now() - timedelta(days=days)
+    return df[df["at"] >= cutoff]
 
-    return recent_df
 
 # ---------------------------------------------------------
-# 2. 텍스트 토큰화 & 키워드 추출 (순수 파이썬, 1단어 기준)
+# 5. 상단 헤더 (앱 로고 + 타이틀 + 설정)
 # ---------------------------------------------------------
-KOREAN_STOPWORDS = set(
-    [
-        "모니모",
-        "삼성카드",
-        "앱",
-        "어플",
-        "사용",
-        "이",
-        "그",
-        "저",
-        "것",
-        "수",
-        "때",
-        "자꾸",
-        "왜",
-        "좀",
-        "해",
-        "더",
-        "함",
-        "정도",
-        "그리고",
-        "그냥",
-        "진짜",
-        "보고",
-        "해서",
-        "하면",
-        "이번",
-        "최근",
-        "거의",
-        "계속",
-        "매우",
-        "이후",
-        "이후로",
-        "이후에",
-        # ✅ 새로 제한할 단어들
-        "다시",
-        "너무",
-        "하고",
-        "하기",
-        "다른",
-        "정말",
-        "무슨",
-    ]
+cols_header = st.columns([0.12, 0.78, 0.10])
+
+with cols_header[0]:
+    st.markdown(
+        f"""
+        <img class="app-logo" src="https://play-lh.googleusercontent.com/g-tkfYaRAe0u_DqUAtk4ETg0nl3ZoJIrntTC_K-A4WmpeP-yQi80IHsugmpMEGm9qWCD82HbeeyI-tYQsH1YKg">
+        """,
+        unsafe_allow_html=True,
+    )
+
+with cols_header[1]:
+    st.markdown("## 📱 모니모 플레이스토어 리뷰 분석 대시보드")
+
+with cols_header[2]:
+    if st.button("⚙️ 설정", key="settings_button"):
+        st.session_state["show_settings"] = True
+
+
+# ---------------------------------------------------------
+# 6. 팝업 설정창
+# ---------------------------------------------------------
+if st.session_state.get("show_settings", False):
+    with st.modal("🔧 분석 옵션 설정"):
+        days_option = st.slider("최근 리뷰 수집 기간(일)", 3, 30, 7)
+        if st.button("닫기"):
+            st.session_state["show_settings"] = False
+
+
+days = st.session_state.get("days_option", 7)
+
+# ---------------------------------------------------------
+# 7. 데이터 로드
+# ---------------------------------------------------------
+df = get_reviews(days)
+
+if df.empty:
+    st.warning("최근 리뷰가 부족합니다.")
+    st.markdown(CONTAINER_END, unsafe_allow_html=True)
+    st.stop()
+
+
+# ---------------------------------------------------------
+# 8. KPI 카드
+# ---------------------------------------------------------
+total_reviews = len(df)
+avg_score = df["score"].mean()
+positive_ratio = len(df[df["score"] >= 4]) / total_reviews * 100
+negative_ratio = len(df[df["score"] <= 2]) / total_reviews * 100
+
+c1, c2, c3, c4 = st.columns(4)
+
+with c1:
+    st.markdown('<div class="kpi-card"><div class="kpi-value">'
+                f"{avg_score:.2f} ⭐</div><div class='kpi-label'>평균 평점</div></div>", unsafe_allow_html=True)
+
+with c2:
+    st.markdown('<div class="kpi-card"><div class="kpi-value">'
+                f"{total_reviews} 건</div><div class='kpi-label'>총 리뷰 수</div></div>", unsafe_allow_html=True)
+
+with c3:
+    st.markdown('<div class="kpi-card kpi-positive"><div class="kpi-value">'
+                f"{positive_ratio:.1f}%</div><div class='kpi-label'>긍정 리뷰 비율</div></div>", unsafe_allow_html=True)
+
+with c4:
+    st.markdown('<div class="kpi-card"><div class="kpi-value">'
+                f"{negative_ratio:.1f}%</div><div class='kpi-label'>부정 리뷰 비율</div></div>", unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------
+# 9. 그래프
+# ---------------------------------------------------------
+st.markdown("<div class='section-spacing'></div>", unsafe_allow_html=True)
+st.subheader("📅 일별 평균 평점 추이")
+
+daily_df = df.groupby(df["at"].dt.date)["score"].mean().reset_index()
+fig = px.line(
+    daily_df,
+    x="at", y="score",
+    markers=True,
+    labels={"at": "날짜", "score": "평점"}
+)
+fig.update_yaxes(range=[1, 5])
+st.plotly_chart(fig, use_container_width=True)
+
+
+# ---------------------------------------------------------
+# 10. 키워드 분석
+# ---------------------------------------------------------
+st.markdown("<div class='section-spacing'></div>", unsafe_allow_html=True)
+st.subheader("🔑 주요 키워드 분석")
+
+positive_reviews = df[df["score"] >= 4]["content"]
+negative_reviews = df[df["score"] <= 2]["content"]
+
+tab1, tab2 = st.tabs(["🔥 부정 리뷰 키워드", "🍀 긍정 리뷰 키워드"])
+
+def render_wordcloud_and_keywords(text_series):
+    keywords = extract_keywords(text_series)
+
+    # 랜덤 상태 매번 변경 (애니메이션 느낌)
+    random_state = random.randint(0, 99999)
+
+    wc = WordCloud(
+        font_path=FONT_PATH,
+        background_color="white",
+        width=1000,
+        height=600,
+        max_words=150,
+        random_state=random_state,
+        color_func=lambda *args, **kwargs: f"hsl({random.randint(0,360)}, 70%, 45%)",
+    ).generate_from_frequencies(keywords)
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+    ax.imshow(wc, interpolation="bilinear")
+    ax.axis("off")
+
+    st.pyplot(fig)
+
+    # Top 10 키워드 노출
+    top10 = [k for k, v in keywords.most_common(10)]
+    st.markdown(f"**Top 10 키워드:** {top10}")
+
+
+with tab1:
+    render_wordcloud_and_keywords(negative_reviews)
+
+with tab2:
+    render_wordcloud_and_keywords(positive_reviews)
+
+
+# ---------------------------------------------------------
+# 11. 리뷰 원문 (페이지네이션)
+# ---------------------------------------------------------
+st.markdown("<div class='section-spacing'></div>", unsafe_allow_html=True)
+st.subheader("📝 리뷰 원문")
+
+page_size = 15
+total_pages = (len(df) - 1) // page_size + 1
+page = st.number_input("페이지 선택", 1, total_pages, 1)
+
+start = (page - 1) * page_size
+end = start + page_size
+
+st.dataframe(
+    df[["at", "userName", "score", "content"]].sort_values("at", ascending=False).iloc[start:end],
+    use_container_width=True
 )
 
-
-def tokenize_korean(text: str):
-    """한글/숫자 위주로 토큰화 & 2글자 이상 단어만 사용."""
-    text = re.sub(r"[^가-힣0-9\s]", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    if not text:
-        return []
-
-    tokens = text.split()
-    tokens = [
-        t for t in tokens if len(t) >= 2 and t not in KOREAN_STOPWORDS and not t.isdigit()
-    ]
-    return tokens
-
-
-def extract_unigrams(text_series: pd.Series) -> Counter:
-    """단어(유니그램) 빈도."""
-    all_tokens = []
-    for t in text_series.dropna().astype(str):
-        all_tokens.extend(tokenize_korean(t))
-    return Counter(all_tokens)
-
-# ---------------------------------------------------------
-# 3. WordCloud용 폰트 경로 탐색
-# ---------------------------------------------------------
-def get_korean_font_path():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    candidates = [
-        os.path.join(base_dir, "NanumGothic.ttf"),
-        os.path.join(base_dir, "NotoSansKR-Regular.otf"),
-        "/System/Library/Fonts/AppleGothic.ttf",
-        "/Library/Fonts/AppleGothic.ttf",
-        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-        "malgun.ttf",
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            return path
-    return None
-
-
-FONT_PATH = get_korean_font_path()
-
-# ---------------------------------------------------------
-# 4. UI 렌더링 함수들
-# ---------------------------------------------------------
-def render_kpi_cards(avg_score, total_reviews, negative_ratio, positive_ratio):
-    """상단 KPI 카드 4개 렌더링."""
-    html = f"""
-    <div class="kpi-wrapper">
-        <div class="kpi-card kpi-avg-score">
-            <div class="kpi-title">평균 평점</div>
-            <div class="kpi-value">{avg_score:.2f} ⭐</div>
-            <div class="kpi-sub">선택한 기간 기준 평균 앱 평점</div>
-        </div>
-        <div class="kpi-card kpi-total-reviews">
-            <div class="kpi-title">총 리뷰 수</div>
-            <div class="kpi-value">{total_reviews} 건</div>
-            <div class="kpi-sub">선택한 기간 동안 수집된 리뷰 수</div>
-        </div>
-        <div class="kpi-card kpi-negative-ratio">
-            <div class="kpi-title">부정 리뷰 비율</div>
-            <div class="kpi-value">{negative_ratio:.1f}%</div>
-            <div class="kpi-sub">1~2점 리뷰 비중</div>
-        </div>
-        <div class="kpi-card kpi-positive-ratio">
-            <div class="kpi-title">긍정 리뷰 비율</div>
-            <div class="kpi-value">{positive_ratio:.1f}%</div>
-            <div class="kpi-sub">4~5점 리뷰 비중</div>
-        </div>
-    </div>
-    """
-    st.markdown(html, unsafe_allow_html=True)
-
-
-def render_keyword_badges(counter_obj: Counter, positive: bool = True):
-    """Top10 키워드를 뱃지 형태로 렌더링 (1단어 기준)."""
-    style_class = "badge-positive" if positive else "badge-negative"
-
-    if not counter_obj:
-        st.write("키워드가 충분하지 않습니다.")
-        return
-
-    items = counter_obj.most_common(10)  # ✅ 10개 노출
-    badges = "".join(
-        f"<span class='keyword-badge {style_class}'>{k} ({v})</span>"
-        for k, v in items
-    )
-    st.markdown(f"<div class='card'>{badges}</div>", unsafe_allow_html=True)
-
-
-def render_review_list(df_page: pd.DataFrame):
-    """현재 페이지에 해당하는 리뷰 카드 리스트."""
-    st.markdown("<div class='review-list'>", unsafe_allow_html=True)
-
-    for _, row in df_page.iterrows():
-        user = row.get("userName", "익명 사용자") or "익명 사용자"
-        score = row.get("score", "-")
-        content = row.get("content", "")
-        date_str = row["at"].strftime("%Y-%m-%d")
-
-        # ✅ Solar Duotone Bold user icon 적용
-        card_html = f"""
-        <div class="review-card">
-            <div class="review-header">
-                <span class="review-user">
-                    <iconify-icon icon="solar:user-bold-duotone" style="font-size:16px;"></iconify-icon>
-                    {user}
-                </span>
-                <span class="review-score">⭐ {score}</span>
-            </div>
-            <div class="review-header" style="margin-bottom:4px;">
-                <span>{date_str}</span>
-            </div>
-            <div class="review-content">{content}</div>
-        </div>
-        """
-        st.markdown(card_html, unsafe_allow_html=True)
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ---------------------------------------------------------
-# 5. 메인 앱
-# ---------------------------------------------------------
-def main():
-    # ✅ 설정값 초기화 (분석 기간 / 페이지 번호)
-    if "days" not in st.session_state:
-        st.session_state["days"] = 7
-    if "page" not in st.session_state:
-        st.session_state["page"] = 1
-
-    # ---------- 상단 헤더 + 우측 설정 아이콘 (popover) ----------
-    with st.container():
-        st.markdown('<div class="header-row">', unsafe_allow_html=True)
-        left_col, right_col = st.columns([0.8, 0.2])
-
-        with left_col:
-            # ✅ 모니모 로고 + 타이틀
-            st.markdown(
-                """
-                <div class="logo-title">
-                    <img src="https://play-lh.googleusercontent.com/g-tkfYaRAe0u_DqUAtk4ETg0nl3ZoJIrntTC_K-A4WmpeP-yQi80IHsugmpMEGm9qWCD82HbeeyI-tYQsH1YKg" alt="모니모 로고" />
-                    <div>
-                        <h1 style="margin-bottom:2px;">모니모 플레이스토어 리뷰 대시보드</h1>
-                        <p style="margin-top:0; color:#6b7280; font-size:13px;">
-                            Google Play 리뷰를 기반으로 모니모 앱의 사용자 반응을 분석합니다.
-                        </p>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        with right_col:
-            # ✅ 우상단 설정 아이콘 + 팝업 (분석 옵션)
-            with st.popover("⚙️ 설정", use_container_width=False):
-                st.write("분석 옵션")
-                st.session_state["days"] = st.slider(
-                    "최근 N일 기준",
-                    min_value=3,
-                    max_value=30,
-                    value=st.session_state["days"],
-                    step=1,
-                )
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    days = st.session_state["days"]
-    st.markdown(
-        f"**분석 기간:** 최근 {days}일 ({(datetime.now() - timedelta(days=days)):%Y-%m-%d} ~ {datetime.now():%Y-%m-%d})"
-    )
-
-    # ---------- 데이터 로드 ----------
-    with st.spinner("Google Play 리뷰를 수집하는 중입니다..."):
-        try:
-            df = get_reviews(days)
-        except Exception as e:
-            st.error(f"데이터 수집 중 오류 발생: {e}")
-            return
-
-    if df.empty:
-        st.warning("선택한 기간 동안 작성된 리뷰가 없거나 수집되지 않았습니다.")
-        return
-
-    # KPI 계산
-    avg_score = df["score"].mean()
-    total_reviews = len(df)
-    negative_cnt = len(df[df["score"] <= 2])
-    positive_cnt = len(df[df["score"] >= 4])
-    negative_ratio = negative_cnt / total_reviews * 100
-    positive_ratio = positive_cnt / total_reviews * 100
-
-    # ---------- KPI 카드 ----------
-    render_kpi_cards(avg_score, total_reviews, negative_ratio, positive_ratio)
-
-    # ---------- 좌/우 레이아웃 ----------
-    left_col, right_col = st.columns([0.6, 0.4], gap="large")
-
-    # ----- 좌측: 추이 + 키워드 -----
-    with left_col:
-        st.subheader("📈 일별 평균 평점 추이")
-        daily_df = (
-            df.groupby(df["at"].dt.date)["score"].mean().reset_index(name="score")
-        )
-        daily_df.rename(columns={"at": "date"}, inplace=True)
-
-        fig_line = px.line(
-            daily_df,
-            x="date",
-            y="score",
-            markers=True,
-            labels={"date": "날짜", "score": "평점"},
-        )
-        fig_line.update_traces(line_shape="spline", line={"width": 4})
-        fig_line.update_yaxes(range=[0.5, 5.5])
-        fig_line.update_layout(
-            height=320,
-            plot_bgcolor="#ffffff",
-            margin=dict(l=20, r=20, t=30, b=30),
-        )
-        st.plotly_chart(fig_line, use_container_width=True)
-
-        st.markdown("---")
-        st.subheader("🔑 주요 키워드 분석")
-
-        positive_reviews = df[df["score"] >= 4]["content"]
-        negative_reviews = df[df["score"] <= 2]["content"]
-
-        tab_neg, tab_pos = st.tabs(["🔥 부정 리뷰", "🍀 긍정 리뷰"])
-
-        # ----- 부정 리뷰 탭 -----
-        with tab_neg:
-            if not negative_reviews.empty:
-                neg_unigrams = extract_unigrams(negative_reviews)
-
-                st.markdown("**Top 10 부정 키워드 (1단어 기준)**")
-                render_keyword_badges(neg_unigrams, positive=False)
-
-                st.markdown("**Word Cloud**")
-                if FONT_PATH is None:
-                    st.info("한글 폰트를 찾을 수 없어 WordCloud가 깨져 보일 수 있습니다. (NanumGothic.ttf 등을 프로젝트 루트에 추가하면 해결됩니다.)")
-                wc = WordCloud(
-                    font_path=FONT_PATH,
-                    background_color="white",
-                    width=800,
-                    height=300,
-                ).generate_from_frequencies(neg_unigrams)
-
-                fig, ax = plt.subplots(figsize=(8, 3))
-                ax.imshow(wc, interpolation="bilinear")
-                ax.axis("off")
-                st.pyplot(fig)
-                plt.close(fig)
-            else:
-                st.info("부정 리뷰가 충분하지 않습니다.")
-
-        # ----- 긍정 리뷰 탭 -----
-        with tab_pos:
-            if not positive_reviews.empty:
-                pos_unigrams = extract_unigrams(positive_reviews)
-
-                st.markdown("**Top 10 긍정 키워드 (1단어 기준)**")
-                render_keyword_badges(pos_unigrams, positive=True)
-
-                st.markdown("**Word Cloud**")
-                if FONT_PATH is None:
-                    st.info("한글 폰트를 찾을 수 없어 WordCloud가 깨져 보일 수 있습니다. (NanumGothic.ttf 등을 프로젝트 루트에 추가하면 해결됩니다.)")
-                wc_pos = WordCloud(
-                    font_path=FONT_PATH,
-                    background_color="white",
-                    width=800,
-                    height=300,
-                ).generate_from_frequencies(pos_unigrams)
-
-                fig2, ax2 = plt.subplots(figsize=(8, 3))
-                ax2.imshow(wc_pos, interpolation="bilinear")
-                ax2.axis("off")
-                st.pyplot(fig2)
-                plt.close(fig2)
-            else:
-                st.info("긍정 리뷰가 충분하지 않습니다.")
-
-    # ----- 우측: 리뷰 리스트 + 페이지네이션 -----
-    with right_col:
-        st.subheader("📝 리뷰 원문 보기")
-
-        df_sorted = df[["userName", "score", "content", "at"]].sort_values(
-            by="at", ascending=False
-        )
-
-        page_size = 15
-        total = len(df_sorted)
-        max_page = max(1, math.ceil(total / page_size))
-
-        # 현재 페이지가 범위를 벗어나지 않게 보정
-        if st.session_state["page"] > max_page:
-            st.session_state["page"] = max_page
-        if st.session_state["page"] < 1:
-            st.session_state["page"] = 1
-
-        col_prev, col_info, col_next = st.columns([1, 2, 1])
-
-        with col_prev:
-            if st.button("⬅ 이전", disabled=(st.session_state["page"] <= 1)):
-                st.session_state["page"] -= 1
-
-        with col_next:
-            if st.button("다음 ➡", disabled=(st.session_state["page"] >= max_page)):
-                st.session_state["page"] += 1
-
-        with col_info:
-            st.markdown(
-                f"<div class='pagination-info'>페이지 {st.session_state['page']} / {max_page} (총 {total}개)</div>",
-                unsafe_allow_html=True,
-            )
-
-        start = (st.session_state["page"] - 1) * page_size
-        end = start + page_size
-        df_page = df_sorted.iloc[start:end]
-
-        render_review_list(df_page)
-
-
-if __name__ == "__main__":
-    main()
+st.markdown(CONTAINER_END, unsafe_allow_html=True)
