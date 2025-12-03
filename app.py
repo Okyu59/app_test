@@ -23,10 +23,13 @@ st.set_page_config(
 APP_ID = "net.ib.android.smcard"  # 모니모 패키지명
 
 # ---------------------------------------------------------
-# 전역 CSS – 최대 가로폭 / KPI 카드 / 키워드 뱃지 / 리뷰 카드
+# 전역 CSS + Iconify 스크립트 – 최대 가로폭 / KPI 카드 / 키워드 뱃지 / 리뷰 카드 / 애니메이션
 # ---------------------------------------------------------
 st.markdown(
     """
+<!-- Iconify Solar Duotone Bold Icons -->
+<script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+
 <style>
 body {
     background-color: #f5f7fb;
@@ -41,12 +44,34 @@ body {
     margin-right: auto;
 }
 
-/* 상단 헤더 오른쪽 아이콘 정렬용 */
+/* 상단 헤더: 로고 + 타이틀 레이아웃 */
 .header-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 0.5rem;
+}
+.logo-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.logo-title img {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+}
+
+/* 키프레임 애니메이션 */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 /* KPI 카드 */
@@ -59,12 +84,18 @@ body {
 .kpi-card {
     flex: 1;
     min-width: 200px;
-    padding: 22px 22px;          /* ✅ 높이 조금 더 키움 */
+    padding: 22px 22px;          /* 높이 조금 더 키움 */
     border-radius: 20px;
     color: #ffffff;
     box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
     position: relative;
     overflow: hidden;
+    animation: fadeInUp 0.4s ease-out;
+    transition: transform 0.18s ease-out, box-shadow 0.18s ease-out;
+}
+.kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.25);
 }
 .kpi-title {
     font-size: 14px;
@@ -103,6 +134,12 @@ body {
     border-radius: 18px;
     box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
     margin-bottom: 18px;
+    animation: fadeInUp 0.4s ease-out;
+    transition: transform 0.18s ease-out, box-shadow 0.18s ease-out;
+}
+.card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
 }
 
 /* 키워드 뱃지 */
@@ -138,6 +175,12 @@ body {
     border-radius: 14px;
     margin-bottom: 10px;
     box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+    animation: fadeInUp 0.35s ease-out;
+    transition: transform 0.16s ease-out, box-shadow 0.16s ease-out;
+}
+.review-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 26px rgba(15, 23, 42, 0.14);
 }
 .review-header {
     display: flex;
@@ -150,6 +193,9 @@ body {
 .review-user {
     font-weight: 600;
     color: #111827;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
 }
 .review-score {
     font-weight: 600;
@@ -209,7 +255,6 @@ KOREAN_STOPWORDS = set(
         "사용",
         "이",
         "그",
-        "로",
         "저",
         "것",
         "수",
@@ -235,12 +280,12 @@ KOREAN_STOPWORDS = set(
         "이후",
         "이후로",
         "이후에",
-        "이렇게",
+        # ✅ 새로 제한할 단어들
         "다시",
         "너무",
         "하고",
         "하기",
-         "다른",
+        "다른",
         "정말",
         "무슨",
     ]
@@ -323,14 +368,14 @@ def render_kpi_cards(avg_score, total_reviews, negative_ratio, positive_ratio):
 
 
 def render_keyword_badges(counter_obj: Counter, positive: bool = True):
-    """Top5 키워드를 뱃지 형태로 렌더링 (1단어 기준)."""
+    """Top10 키워드를 뱃지 형태로 렌더링 (1단어 기준)."""
     style_class = "badge-positive" if positive else "badge-negative"
 
     if not counter_obj:
         st.write("키워드가 충분하지 않습니다.")
         return
 
-    items = counter_obj.most_common(10)
+    items = counter_obj.most_common(10)  # ✅ 10개 노출
     badges = "".join(
         f"<span class='keyword-badge {style_class}'>{k} ({v})</span>"
         for k, v in items
@@ -348,10 +393,14 @@ def render_review_list(df_page: pd.DataFrame):
         content = row.get("content", "")
         date_str = row["at"].strftime("%Y-%m-%d")
 
+        # ✅ Solar Duotone Bold user icon 적용
         card_html = f"""
         <div class="review-card">
             <div class="review-header">
-                <span class="review-user">{user}</span>
+                <span class="review-user">
+                    <iconify-icon icon="solar:user-bold-duotone" style="font-size:16px;"></iconify-icon>
+                    {user}
+                </span>
                 <span class="review-score">⭐ {score}</span>
             </div>
             <div class="review-header" style="margin-bottom:4px;">
@@ -380,9 +429,20 @@ def main():
         left_col, right_col = st.columns([0.8, 0.2])
 
         with left_col:
-            st.title("📱 모니모 플레이스토어 리뷰 대시보드")
-            st.caption(
-                "Google Play 리뷰를 기반으로 모니모 앱의 사용자 반응을 분석합니다."
+            # ✅ 모니모 로고 + 타이틀
+            st.markdown(
+                """
+                <div class="logo-title">
+                    <img src="https://play-lh.googleusercontent.com/g-tkfYaRAe0u_DqUAtk4ETg0nl3ZoJIrntTC_K-A4WmpeP-yQi80IHsugmpMEGm9qWCD82HbeeyI-tYQsH1YKg" alt="모니모 로고" />
+                    <div>
+                        <h1 style="margin-bottom:2px;">모니모 플레이스토어 리뷰 대시보드</h1>
+                        <p style="margin-top:0; color:#6b7280; font-size:13px;">
+                            Google Play 리뷰를 기반으로 모니모 앱의 사용자 반응을 분석합니다.
+                        </p>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
         with right_col:
@@ -467,15 +527,17 @@ def main():
             if not negative_reviews.empty:
                 neg_unigrams = extract_unigrams(negative_reviews)
 
-                st.markdown("**Top 10 부정 키워드**")
+                st.markdown("**Top 10 부정 키워드 (1단어 기준)**")
                 render_keyword_badges(neg_unigrams, positive=False)
 
                 st.markdown("**Word Cloud**")
+                if FONT_PATH is None:
+                    st.info("한글 폰트를 찾을 수 없어 WordCloud가 깨져 보일 수 있습니다. (NanumGothic.ttf 등을 프로젝트 루트에 추가하면 해결됩니다.)")
                 wc = WordCloud(
                     font_path=FONT_PATH,
                     background_color="white",
                     width=800,
-                    height=600,
+                    height=300,
                 ).generate_from_frequencies(neg_unigrams)
 
                 fig, ax = plt.subplots(figsize=(8, 3))
@@ -491,15 +553,17 @@ def main():
             if not positive_reviews.empty:
                 pos_unigrams = extract_unigrams(positive_reviews)
 
-                st.markdown("**Top 10 긍정 키워드**")
+                st.markdown("**Top 10 긍정 키워드 (1단어 기준)**")
                 render_keyword_badges(pos_unigrams, positive=True)
 
                 st.markdown("**Word Cloud**")
+                if FONT_PATH is None:
+                    st.info("한글 폰트를 찾을 수 없어 WordCloud가 깨져 보일 수 있습니다. (NanumGothic.ttf 등을 프로젝트 루트에 추가하면 해결됩니다.)")
                 wc_pos = WordCloud(
                     font_path=FONT_PATH,
                     background_color="white",
                     width=800,
-                    height=600,
+                    height=300,
                 ).generate_from_frequencies(pos_unigrams)
 
                 fig2, ax2 = plt.subplots(figsize=(8, 3))
